@@ -1371,3 +1371,75 @@ function email_civicrm_post($op, $objectName, $objectId, &$objectRef) {
     // Zet vlag uit
     $processing = false;
 }
+
+/**
+ * Implements hook_civicrm_alterMailParams().
+ * * @param array  $params  De mail parameters die we gaan aanpassen.
+ * @param string $context De context waaruit de mail wordt verstuurd.
+ */
+function email_civicrm_alterMailParams(&$params, $context) {
+    
+  // --- CONFIGURATIE ---
+  $extdebug     = 1; // Debug niveau voor wachthond
+  $switchActive = 0; // 1 = Routing actief, 0 = Alles via standaard CiviCRM instellingen
+  // --------------------
+
+  // Als de switch uit staat, doen we niets en laten we CiviCRM de standaard instellingen gebruiken.
+  if (!$switchActive) {
+    return;
+  }
+
+  // ########################################################################
+  // ### INTAKE [PRE] 0.5 SMTP ROUTING CHECK: BEPAAL MAIL-TYPE
+  // ########################################################################
+
+  // Identificatie variabelen netjes onder elkaar uitgelijnd
+  $isBulk      = ($context === 'civimail' || $context === 'bulkmail');
+  $isReminder  = ($context === 'actionmailing');
+  $isRule      = (isset($params['groupName']) && $params['groupName'] === 'CiviRules');
+  $isCron      = (PHP_SAPI === 'cli'); // Achtergrondprocessen
+
+  // ########################################################################
+  // ### ROUTING LOGICA: SCHAKELEN TUSSEN DIRECT EN RELAY
+  // ########################################################################
+
+  if ($isBulk || $isReminder || $isRule || $isCron) {
+    
+    // ROUTE: RELAY (Hoge volumes, geen 'Sent items' opslag)
+    $params['smtp_server'] = 'smtp-relay.gmail.com';
+    $params['smtp_port']   = 587;
+    $params['auth']        = TRUE;
+    $currentRoute          = "RELAY (Bulk/Systeem)";
+    
+  } else {
+    
+    // ROUTE: DIRECT (Persoonlijk/Transactie, zichtbaar in 'Sent items')
+    $params['smtp_server'] = 'smtp.gmail.com';
+    $params['smtp_port']   = 465;
+    $params['auth']        = TRUE;
+    $currentRoute          = "DIRECT (Persoonlijk)";
+    
+  }
+
+  // ########################################################################
+  // ### LOGGING: OUTPUT NAAR WATCHDOG
+  // ########################################################################
+
+  if (!$isBulk) {
+    // Uitgebreide sectie voor 1-op-1 mails
+    wachthond($extdebug, 2, "########################################################################");
+    wachthond($extdebug, 1, "### MAIL ROUTING CHECK: $currentRoute", "[MAIL-FLOW]");
+    
+    $subject = $params['subject'] ?? 'Geen onderwerp';
+    
+    // Nette uitlijning van debug waarden
+    wachthond($extdebug, 1, "GEKOZEN ROUTE  : " . $currentRoute, "[MAIL-FLOW]");
+    wachthond($extdebug, 1, "MAIL CONTEXT   : " . $context,      "[MAIL-FLOW]");
+    wachthond($extdebug, 1, "ONDERWERP      : " . $subject,       "[MAIL-FLOW]");
+    
+    wachthond($extdebug, 2, "########################################################################");
+  } else {
+    // Compacte regel voor Bulk Mailings
+    wachthond($extdebug, 1, "MAIL ROUTING [BULK]: $currentRoute -> " . ($params['toEmail'] ?? 'onbekend'), "[MAIL-BULK]");
+  }
+}
